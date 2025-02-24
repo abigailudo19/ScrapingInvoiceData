@@ -1,0 +1,130 @@
+from spire.doc import *
+from spire.doc.common import *
+from spire.xls import*
+from spire.xls.common import*
+
+# Copy text with formatting from a paragraph in Word to a cell in Excel
+def CopyTextAndStyle(worksheet: Worksheet, cell: CellRange, paragraph: Paragraph):
+    richText = cell.RichText
+    richText.Text = paragraph.Text
+    startIndex = 0
+    for i in range(paragraph.ChildObjects.Count):
+        documentObject = paragraph.ChildObjects[i]
+        if(isinstance(documentObject, TextRange)):
+            textRange = TextRange(documentObject)
+            fontName = textRange.CharacterFormat.FontName
+            isBold = textRange.CharacterFormat.Bold
+            textColor = textRange.CharacterFormat.TextColor
+            argb_color = Html_to_argb(textColor.Name)
+            fontSize = textRange.CharacterFormat.FontSize
+            textRange_text = textRange.Text
+            strLength = len(textRange_text)
+            font = worksheet.Workbook.CreateFont()
+            font.Color = Color.FromArgb(argb_color[0], argb_color[1], argb_color[2], argb_color[3])
+            font.IsBold = isBold
+            font.Size = fontSize
+            font.FontName = fontName
+            endIndex = startIndex + strLength
+            richText.SetFont(startIndex, endIndex, font)
+
+            startIndex += strLength
+        if(isinstance(documentObject, DocPicture)):
+            picture = DocPicture(documentObject)
+            cell.Worksheet.Pictures.Add(cell.Row, cell.Column, picture)
+            cell.Worksheet.SetRowHeightInPixels(cell.Row, 1, picture.Height)
+        if(paragraph.Format.HorizontalAlignment == HorizontalAlignment.Left):
+            cell.Style.HorizontalAlignment = HorizontalAlignment.Left
+        elif(paragraph.Format.HorizontalAlignment == HorizontalAlignment.Center):
+            cell.Style.HorizontalAlignment = HorizontalAlignType.Center
+        else:
+            cell.Style.HorizontalAlignment = HorizontalAlignType.Right  
+
+# Copy content from a table cell in Word to an Excel cell
+def CopyContentInTable(tableCell: TableCell, cell: CellRange, worksheet: Worksheet):
+    newParagraph = Paragraph(tableCell.Document)
+    for i in range(tableCell.ChildObjects.Count):
+        documentObject = tableCell.ChildObjects[i]
+        if(isinstance(documentObject, Paragraph)):
+            paragraph = Paragraph(documentObject)
+            for j in range(paragraph.ChildObjects.Count):
+                childObject = paragraph.ChildObjects[j]
+                newParagraph.ChildObjects.Add(childObject.Clone())
+            if(i < tableCell.ChildObjects.Count - 1):
+                newParagraph.AppendText("\n")
+    CopyTextAndStyle(worksheet, cell, newParagraph)
+
+# Export data with formatting from a Word table to specified Excel cells
+def ExportTableInExcel(worksheet: Worksheet, row: int, table: Table):
+    cell = None
+    column = None
+    for i in range(table.Rows.Count):
+        column = 1
+        tableRow = table.Rows[i]
+        for j in range(tableRow.Cells.Count):
+            cell = worksheet.Range[row, column]
+            cell.BorderAround(LineStyleType.Thin, Color.get_Black())
+            tableCell = tableRow.Cells[j]
+            CopyContentInTable(tableCell, cell, worksheet)
+            column = column + 1
+        row = row + 1
+    return row
+
+# Convert Html color to Argb color
+def Html_to_argb(html_color):
+
+    # Remove the '#' symbol
+    html_color = html_color.lstrip('#')
+    
+    # Convert the hexadecimal color code to integer
+    a = int(html_color[0:2], 16)
+    r = int(html_color[2:4], 16)
+    g = int(html_color[4:6], 16)
+    b = int(html_color[6:8], 16)
+    
+    return a, r, g, b
+
+# Create a Document instance
+document = Document()
+
+# Load a Word document
+document.LoadFromFile("C:\\Users\\Administrator\\Desktop\\Invoice.docx")
+
+# Create a Workbook object
+workbook = Workbook()
+
+# Remove the default worksheets
+workbook.Worksheets.Clear()
+
+# Create a worksheet named "WordToExcel"
+worksheet = workbook.CreateEmptySheet("WordToExcel")
+
+# Declare two variables
+row = 1
+column = 1
+
+# Loop through the sections in the Word document
+for i in range(document.Sections.Count):
+    section  = document.Sections[i]
+
+    for j in range(section.Body.ChildObjects.Count):
+        documentObject = section.Body.ChildObjects[j]
+        if(isinstance(documentObject, Paragraph)):
+            cell = worksheet.Range[row, column]
+            paragraph = Paragraph(documentObject)
+            CopyTextAndStyle(worksheet, cell, paragraph)
+            row = row + 1
+        if(isinstance(documentObject, Table)):
+            table = Table(documentObject)
+            currentRow = ExportTableInExcel(worksheet, row, table)
+            row = currentRow
+
+# Wrap text in cells
+worksheet.AllocatedRange.IsWrapText = True
+
+# Auto fit column width
+worksheet.AllocatedRange.AutoFitColumns()
+
+# Save the workbook to an Excel file
+workbook.SaveToFile("output/WordToExcel.xlsx", ExcelVersion.Version2016)
+
+# Dispose resources
